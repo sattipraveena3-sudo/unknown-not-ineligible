@@ -7,7 +7,8 @@ uncertainty when decision-critical evidence is missing from public-benefit recor
 
 | Component | Status |
 |---|---|
-| Official SNAP QC FY2024 data and documentation | Downloaded and checksum-verified |
+| Official SNAP QC FY2024 primary data | Downloaded and checksum-verified |
+| Official SNAP QC FY2023 temporal-validation data | Downloaded and checksum-verified |
 | Dataset validation | Implemented |
 | Real-record paired benchmark builder | Implemented |
 | Deterministic oracle and scorer | Implemented |
@@ -48,7 +49,8 @@ make test
 make build
 ```
 
-The built benchmark is written to `data/processed/benchmark.jsonl`. Source household
+The primary benchmark is written to `data/processed/benchmark.jsonl`, and the FY2023
+temporal-validation benchmark to `data/processed/benchmark_2023.jsonl`. Source household
 identifiers are never emitted; deterministic SHA-256 pseudonyms are used instead.
 
 ## Run a small API smoke check
@@ -84,4 +86,3 @@ not reproduce. See `docs/ethics_and_limitations.md`.
 - Data portal: https://snapqcdata.net/datafiles
 - FY2024 technical documentation: included by the verified downloader
 - SNAP QC regulation: https://www.ecfr.gov/current/title-7/subtitle-B/chapter-II/subchapter-C/part-275/subpart-C
-
