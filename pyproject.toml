@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "unknown-not-ineligible"
+version = "0.1.0"
+description = "A real-record benchmark for uncertainty preservation in SNAP eligibility decisions"
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.27,<1",
+  "matplotlib>=3.8,<4",
+  "numpy>=1.26,<3",
+  "pandas>=2.2,<3",
+  "pydantic>=2.7,<3",
+  "PyYAML>=6,<7",
+  "scipy>=1.12,<2",
+  "seaborn>=0.13,<1",
+  "tenacity>=8.2,<10",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9", "ruff>=0.6,<1"]
+
+[project.scripts]
+uni-build = "unknown_ineligible.build_cases:main"
+uni-run = "unknown_ineligible.run_models:main"
+uni-score = "unknown_ineligible.score:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
