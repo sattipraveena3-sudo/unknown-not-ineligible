@@ -1,0 +1,9 @@
+seed: 240902
+base_records: 150
+stability_fraction: 0.25
+source_year: 2023
+source_csv: data/raw/qc_pub_fy2023.csv
+output_jsonl: data/processed/benchmark_2023.jsonl
+conditions: [complete, omitted, blank, explicit_unknown, unverified]
+mask_fields: [gross_monthly_income, net_monthly_income, countable_assets]
+protocols: [binary, three_way, uncertainty_instruction, evidence_gated]
