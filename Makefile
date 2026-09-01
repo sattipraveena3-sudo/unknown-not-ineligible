@@ -11,6 +11,7 @@ validate:
 
 build:
 	python -m unknown_ineligible.build_cases --config configs/experiment.yaml
+	python -m unknown_ineligible.build_cases --config configs/external_2023.yaml
 
 test:
 	python -m pytest -q
