@@ -1,0 +1,20 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.egg-info/
+data/interim/
+data/processed/*.jsonl
+results/raw/*.jsonl
+results/tables/*.csv
+results/figures/*.png
+paper/*.pdf
+paper/*.aux
+paper/*.log
+paper/*.out
+
+# Public source data are downloaded by script and not redistributed by Git.
+data/raw/*.csv
+data/raw/*.zip
+data/raw/*.pdf
