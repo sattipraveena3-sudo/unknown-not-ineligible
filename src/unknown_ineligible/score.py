@@ -59,6 +59,7 @@ def main() -> None:
     parser.add_argument("--inputs", required=True, type=Path)
     parser.add_argument("--case-file", default=Path("data/processed/benchmark.jsonl"), type=Path)
     parser.add_argument("--output", default=Path("results/tables/metrics.csv"), type=Path)
+    parser.add_argument("--case-output", default=Path("results/tables/scored_cases.csv"), type=Path)
     args = parser.parse_args()
     case_map = {
         c.case_id: c
@@ -76,11 +77,12 @@ def main() -> None:
         scored.update(model=raw["model"], protocol=raw["protocol"])
         rows.append(scored)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    summary = summarize(pd.DataFrame(rows))
+    case_frame = pd.DataFrame(rows)
+    case_frame.to_csv(args.case_output, index=False)
+    summary = summarize(case_frame)
     summary.to_csv(args.output, index=False)
     print(summary.to_string(index=False))
 
 
 if __name__ == "__main__":
     main()
-
