@@ -1,0 +1,66 @@
+\documentclass[11pt]{article}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\title{Unknown Is Not Ineligible: Evaluating Uncertainty Preservation in\\Language-Model Benefit Decisions}
+\author{Anonymous submission}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Language-model agents increasingly mediate information-intensive decisions, yet a
+missing fact is neither evidence for nor against eligibility. We introduce a paired,
+real-record evaluation of whether agents preserve this distinction in public-benefit
+reasoning. Starting from audited public-use records from the US Supplemental Nutrition
+Assistance Program Quality Control database, we vary only how a decision-critical field
+is presented: complete, omitted, blank, explicitly unknown, or unverified. Our primary
+outcome is the Unknown-to-Denial Rate, complemented by clarification accuracy,
+unsupported evidence use, and over-deferral. We compare forced binary decisions,
+three-way decisions, uncertainty instructions, and an evidence-gated protocol. Results
+will be inserted only after the preregistered model evaluation is completed.
+\end{abstract}
+
+\section{Introduction}
+A system that lacks a required income value does not thereby know that an applicant's
+income exceeds a limit. Nevertheless, binary decision interfaces and language-model
+priors may transform absent evidence into an adverse conclusion. This work isolates that
+failure mode using paired presentations of real audited benefit records.
+
+Our contributions are: (1) a provenance-preserving benchmark derived from real SNAP QC
+records; (2) a deterministic three-way evaluation separating ineligibility from
+insufficient evidence; (3) controlled comparisons among four representations of
+unresolved information; and (4) an evidence-gated protocol evaluated without training.
+
+\section{Task and Data}
+We use the FY2024 SNAP QC public-use database. It contains 44,891 active reviewed cases.
+Because it is not a sample of denied applications, our estimand is model behavior under
+controlled evidence removal, not the population rate of administrative denial.
+
+\section{Experimental Design}
+For each selected record, one applicable decision-critical value is shown completely,
+omitted, blank, marked unknown, or marked unverified. All remaining displayed values are
+identical within the matched set. Models return one of \textsc{eligible},
+\textsc{ineligible}, or \textsc{insufficient information} plus requested fields and
+evidence references.
+
+\section{Metrics}
+Our primary metric is
+\[
+\mathrm{UDR}=\frac{\#\{\text{insufficient-evidence cases predicted ineligible}\}}
+{\#\{\text{insufficient-evidence cases}\}}.
+\]
+
+\section{Results}
+\textbf{Intentionally blank.} No numerical result is reported before execution of the
+preregistered experiment.
+
+\section{Limitations and Ethics}
+The simplified oracle does not reproduce every state rule or waiver and must not be used
+for real decisions. Controlled missingness is an experimental intervention, not a claim
+about natural administrative missingness. Sensitive person-level attributes are not
+presented to models.
+
+\end{document}
+
