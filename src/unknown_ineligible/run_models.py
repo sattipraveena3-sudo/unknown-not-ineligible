@@ -8,10 +8,15 @@ from pathlib import Path
 
 import httpx
 import yaml
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .prompts import build_prompt
 from .schema import AgentAnswer, BenchmarkCase
+
+
+class ProviderCallError(RuntimeError):
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def extract_json(text: str) -> dict:
@@ -23,8 +28,7 @@ def extract_json(text: str) -> dict:
     return json.loads(stripped)
 
 
-@retry(stop=stop_after_attempt(4), wait=wait_exponential(min=1, max=20), reraise=True)
-def call_openai_compatible(
+def _call_once(
     provider: dict, model: str, messages: list[dict], config: dict
 ) -> tuple[str, dict]:
     key = os.getenv(provider["api_key_env"])
@@ -41,10 +45,6 @@ def call_openai_compatible(
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
-    # OpenRouter can surface the upstream routing decision. Recording it makes
-    # provider-level replication/auditing possible without exposing the API key.
-    if "openrouter.ai" in provider["base_url"]:
-        headers["X-OpenRouter-Metadata"] = "enabled"
 
     with httpx.Client(timeout=config.get("timeout_seconds", 90)) as client:
         response = client.post(
@@ -52,9 +52,44 @@ def call_openai_compatible(
             headers=headers,
             json=payload,
         )
-        response.raise_for_status()
+        if response.is_error:
+            # Preserve enough provider detail to diagnose failures without exposing keys.
+            body = response.text.replace("\n", " ")[:1500]
+            raise ProviderCallError(
+                f"HTTP {response.status_code}: {body}", status_code=response.status_code
+            )
         body = response.json()
+
     return body["choices"][0]["message"]["content"], body
+
+
+def call_openai_compatible(
+    provider: dict, model: str, messages: list[dict], config: dict
+) -> tuple[str, dict]:
+    """Retry only genuinely transient transport/5xx failures.
+
+    Deliberately do not retry HTTP 429 or ordinary 4xx responses. Free-tier 429s can
+    represent daily/account limits; blind retries consume scarce quota and do not add
+    scientific value.
+    """
+
+    attempts = int(config.get("max_attempts", 4))
+    for attempt in range(1, attempts + 1):
+        try:
+            return _call_once(provider, model, messages, config)
+        except ProviderCallError as exc:
+            retryable = exc.status_code in {408, 425} or (
+                exc.status_code is not None and 500 <= exc.status_code < 600
+            )
+            if not retryable or attempt >= attempts:
+                raise
+        except (httpx.TimeoutException, httpx.TransportError):
+            if attempt >= attempts:
+                raise
+
+        time.sleep(min(20, 2 ** (attempt - 1)))
+
+    raise AssertionError("unreachable")
 
 
 def main() -> None:
@@ -92,11 +127,19 @@ def main() -> None:
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     counts = {"ok": 0, "schema_or_json_error": 0, "api_error": 0}
+    attempted_cases = 0
+    stopped_early = False
 
     with args.output.open("a", encoding="utf-8") as out:
+        stop_run = False
         for provider_name, provider in config["providers"].items():
+            if stop_run:
+                break
             for model in provider["models"]:
+                if stop_run:
+                    break
                 for local_index, case in enumerate(cases):
+                    attempted_cases += 1
                     started = time.time()
                     row = {
                         "case_id": case.case_id,
@@ -110,7 +153,7 @@ def main() -> None:
                         "response_id": None,
                         "response_model": None,
                         "system_fingerprint": None,
-                        "openrouter_metadata": None,
+                        "api_status_code": None,
                         "error_type": None,
                         "error_message": None,
                     }
@@ -124,7 +167,6 @@ def main() -> None:
                         row["response_id"] = body.get("id")
                         row["response_model"] = body.get("model")
                         row["system_fingerprint"] = body.get("system_fingerprint")
-                        row["openrouter_metadata"] = body.get("openrouter_metadata")
 
                         try:
                             parsed = AgentAnswer.model_validate(extract_json(text))
@@ -134,21 +176,31 @@ def main() -> None:
                             row["error_type"] = "schema_or_json_error"
                             row["error_message"] = f"{type(exc).__name__}: {exc}"[:2000]
                             counts["schema_or_json_error"] += 1
-                    except Exception as exc:  # retries are exhausted before reaching here
+                    except Exception as exc:
                         row["error_type"] = "api_error"
                         row["error_message"] = f"{type(exc).__name__}: {exc}"[:2000]
+                        if isinstance(exc, ProviderCallError):
+                            row["api_status_code"] = exc.status_code
                         counts["api_error"] += 1
+                        # Stop the shard after the first exhausted provider failure. This avoids
+                        # turning a quota/outage into hundreds of meaningless failed requests.
+                        stop_run = True
+                        stopped_early = True
 
                     row["latency_seconds"] = round(time.time() - started, 4)
                     out.write(json.dumps(row) + "\n")
                     out.flush()
+                    if stop_run:
+                        break
 
     print(
         json.dumps(
             {
                 "selected_cases": len(cases),
+                "attempted_cases": attempted_cases,
                 "offset": args.offset,
                 "limit": args.limit,
+                "stopped_early": stopped_early,
                 "counts": counts,
                 "output": str(args.output),
             },
