@@ -6,7 +6,7 @@ on:
       model_id:
         description: "Exact OpenRouter model ID (prefer a specific :free model)"
         required: true
-        default: "openrouter/free"
+        default: "google/gemma-4-26b-a4b-it:free"
         type: string
       protocol:
         description: "Evaluation protocol"
@@ -18,11 +18,21 @@ on:
           - three_way
           - uncertainty_instruction
           - evidence_gated
+      case_offset:
+        description: "Zero-based starting case index for this immutable shard"
+        required: true
+        default: "0"
+        type: string
       case_limit:
-        description: "Number of cases in this batch (free accounts have low daily limits)"
+        description: "Number of cases in this shard (free accounts have low daily limits)"
         required: true
         default: "20"
         type: string
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/smoke-trigger.txt"
 
 permissions:
   contents: read
@@ -38,6 +48,11 @@ jobs:
     env:
       OPENROUTER_API_KEY: ${{ secrets.KEY }}
       PYTHONUNBUFFERED: "1"
+      RUN_KIND: ${{ github.event_name == 'workflow_dispatch' && 'manual' || 'smoke' }}
+      MODEL_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.model_id || 'google/gemma-4-26b-a4b-it:free' }}
+      PROTOCOL: ${{ github.event_name == 'workflow_dispatch' && inputs.protocol || 'evidence_gated' }}
+      CASE_OFFSET: ${{ github.event_name == 'workflow_dispatch' && inputs.case_offset || '0' }}
+      CASE_LIMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.case_limit || '2' }}
 
     steps:
       - name: Check out repository
@@ -73,8 +88,6 @@ jobs:
 
       - name: Create private runtime model configuration
         shell: bash
-        env:
-          MODEL_ID: ${{ inputs.model_id }}
         run: |
           python - <<'PY'
           import os
@@ -98,33 +111,33 @@ jobs:
           )
           PY
 
-      - name: Validate case limit
+      - name: Validate shard inputs
         shell: bash
-        env:
-          CASE_LIMIT: ${{ inputs.case_limit }}
         run: |
+          if ! [[ "$CASE_OFFSET" =~ ^[0-9]+$ ]]; then
+            echo "::error::case_offset must be a non-negative integer."
+            exit 1
+          fi
           if ! [[ "$CASE_LIMIT" =~ ^[1-9][0-9]*$ ]]; then
             echo "::error::case_limit must be a positive integer."
             exit 1
           fi
           if [ "$CASE_LIMIT" -gt 200 ]; then
-            echo "::error::A single free-tier batch is capped at 200 cases."
+            echo "::error::A single free-tier shard is capped at 200 cases."
             exit 1
           fi
 
-      - name: Run genuine model batch
-        env:
-          PROTOCOL: ${{ inputs.protocol }}
-          CASE_LIMIT: ${{ inputs.case_limit }}
+      - name: Run model shard
         run: |
           python -m unknown_ineligible.run_models \
             --models configs/models.local.yaml \
             --cases data/processed/benchmark.jsonl \
             --protocol "$PROTOCOL" \
+            --offset "$CASE_OFFSET" \
             --limit "$CASE_LIMIT" \
             --output results/raw/responses.jsonl
 
-      - name: Score genuine responses
+      - name: Score responses including schema/API failures
         run: |
           python -m unknown_ineligible.score \
             --inputs results/raw/responses.jsonl \
@@ -134,26 +147,32 @@ jobs:
 
       - name: Record reproducibility metadata
         shell: bash
-        env:
-          MODEL_ID: ${{ inputs.model_id }}
-          PROTOCOL: ${{ inputs.protocol }}
-          CASE_LIMIT: ${{ inputs.case_limit }}
         run: |
           {
+            echo "run_kind=${RUN_KIND}"
             echo "commit_sha=${GITHUB_SHA}"
             echo "model_id=${MODEL_ID}"
             echo "protocol=${PROTOCOL}"
+            echo "case_offset=${CASE_OFFSET}"
             echo "case_limit=${CASE_LIMIT}"
             echo "run_id=${GITHUB_RUN_ID}"
             echo "run_attempt=${GITHUB_RUN_ATTEMPT}"
             date -u +"executed_at_utc=%Y-%m-%dT%H:%M:%SZ"
           } > results/RUN_METADATA.txt
 
+      - name: Mark smoke artifacts as non-publication outputs
+        if: env.RUN_KIND == 'smoke'
+        run: |
+          cat > results/SMOKE_ONLY_DO_NOT_USE_IN_PAPER.txt <<'EOF'
+          This artifact was produced only to verify API secret wiring and pipeline plumbing.
+          It is not part of the preregistered experiment and must not be reported as a result.
+          EOF
+
       - name: Upload immutable result artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: model-results-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ env.RUN_KIND }}-model-results-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             results/
           if-no-files-found: error
