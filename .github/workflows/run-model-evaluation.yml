@@ -51,6 +51,7 @@ jobs:
       PROTOCOL: ${{ github.event_name == 'workflow_dispatch' && inputs.protocol || 'evidence_gated' }}
       CASE_OFFSET: ${{ github.event_name == 'workflow_dispatch' && inputs.case_offset || '0' }}
       CASE_LIMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.case_limit || '2' }}
+      CASES_FILE: data/processed/benchmark.jsonl
 
     steps:
       - name: Check out repository
@@ -73,6 +74,45 @@ jobs:
             exit 1
           fi
 
+      - name: Record non-sensitive OpenRouter key diagnostics
+        shell: bash
+        run: |
+          mkdir -p results
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import httpx
+
+          response = httpx.get(
+              "https://openrouter.ai/api/v1/key",
+              headers={"Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}"},
+              timeout=30,
+          )
+          payload = {"http_status": response.status_code}
+          if response.status_code == 200:
+              data = response.json().get("data", {})
+              for field in (
+                  "is_free_tier",
+                  "limit",
+                  "limit_remaining",
+                  "limit_reset",
+                  "usage",
+                  "usage_daily",
+                  "usage_weekly",
+                  "usage_monthly",
+                  "expires_at",
+              ):
+                  payload[field] = data.get(field)
+          else:
+              payload["error"] = response.text[:500]
+          Path("results/KEY_DIAGNOSTICS.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+          )
+          if response.status_code == 401:
+              raise SystemExit("OpenRouter rejected the repository secret KEY (HTTP 401).")
+          PY
+
       - name: Download and verify official datasets
         run: |
           python scripts/download_data.py
@@ -83,6 +123,54 @@ jobs:
 
       - name: Build paired real-record benchmarks
         run: make build
+
+      - name: Select a paired uncertainty case for smoke runs
+        if: env.RUN_KIND == 'smoke'
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from unknown_ineligible.schema import BenchmarkCase
+
+          source = Path("data/processed/benchmark.jsonl")
+          cases = [
+              BenchmarkCase.model_validate_json(line)
+              for line in source.read_text(encoding="utf-8").splitlines()
+              if line.strip()
+          ]
+
+          by_pair = {}
+          for case in cases:
+              if case.expected.decision != "INSUFFICIENT_INFORMATION":
+                  continue
+              if case.condition not in {"omitted", "explicit_unknown"}:
+                  continue
+              key = (case.base_case_id, case.masked_field)
+              by_pair.setdefault(key, {})[case.condition] = case
+
+          selected = None
+          for key in sorted(by_pair):
+              pair = by_pair[key]
+              if "omitted" in pair and "explicit_unknown" in pair:
+                  selected = [pair["omitted"], pair["explicit_unknown"]]
+                  break
+
+          if selected is None:
+              raise SystemExit("No paired omitted/explicit_unknown uncertainty case found.")
+
+          output = Path("data/processed/smoke_benchmark.jsonl")
+          output.write_text(
+              "".join(case.model_dump_json() + "\n" for case in selected),
+              encoding="utf-8",
+          )
+          print(
+              "Selected smoke pair:",
+              [(c.case_id, c.condition, c.masked_field, c.expected.decision) for c in selected],
+          )
+          PY
+          echo "CASES_FILE=data/processed/smoke_benchmark.jsonl" >> "$GITHUB_ENV"
+          echo "CASE_OFFSET=0" >> "$GITHUB_ENV"
+          echo "CASE_LIMIT=2" >> "$GITHUB_ENV"
 
       - name: Create private runtime model configuration
         shell: bash
@@ -103,6 +191,7 @@ jobs:
               "temperature": 0,
               "max_tokens": 500,
               "timeout_seconds": 90,
+              "max_attempts": 4,
           }
           Path("configs/models.local.yaml").write_text(
               yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
@@ -133,17 +222,17 @@ jobs:
         run: |
           python -m unknown_ineligible.run_models \
             --models configs/models.local.yaml \
-            --cases data/processed/benchmark.jsonl \
+            --cases "$CASES_FILE" \
             --protocol "$PROTOCOL" \
             --offset "$CASE_OFFSET" \
             --limit "$CASE_LIMIT" \
             --output results/raw/responses.jsonl
 
-      - name: Score responses including schema/API failures
+      - name: Score responses with preregistered provider-failure handling
         run: |
           python -m unknown_ineligible.score \
             --inputs results/raw/responses.jsonl \
-            --case-file data/processed/benchmark.jsonl \
+            --case-file "$CASES_FILE" \
             --output results/tables/metrics.csv \
             --case-output results/tables/scored_cases.csv
 
@@ -155,6 +244,7 @@ jobs:
             echo "commit_sha=${GITHUB_SHA}"
             echo "model_id=${MODEL_ID}"
             echo "protocol=${PROTOCOL}"
+            echo "cases_file=${CASES_FILE}"
             echo "case_offset=${CASE_OFFSET}"
             echo "case_limit=${CASE_LIMIT}"
             echo "run_id=${GITHUB_RUN_ID}"
@@ -171,3 +261,12 @@ jobs:
             results/
           if-no-files-found: error
           retention-days: 90
+
+      - name: Fail run if provider returned no model output
+        if: always()
+        shell: bash
+        run: |
+          if [ -f results/raw/responses.jsonl ] && grep -q '"error_type": "api_error"' results/raw/responses.jsonl; then
+            echo "::error::Provider/API failure occurred. Artifact was preserved, but this run is not a valid model evaluation."
+            exit 1
+          fi
