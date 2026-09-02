@@ -17,6 +17,9 @@ def score_item(case: BenchmarkCase, answer: AgentAnswer | None, error_type: str 
     api_failure = error_type == "api_error"
 
     if answer is None:
+        # Preregistered handling: malformed/schema-invalid model outputs are task
+        # failures; provider failures that return no model output are documented and
+        # excluded from model-behavior denominators.
         return {
             "case_id": case.case_id,
             "base_case_id": case.base_case_id,
@@ -27,8 +30,10 @@ def score_item(case: BenchmarkCase, answer: AgentAnswer | None, error_type: str 
             "unknown_case": unknown_case,
             "answerable_case": answerable_case,
             "valid_response": False,
-            "decision_correct": False,
-            "task_failure": True,
+            "provider_failure": api_failure,
+            "evaluable_case": not api_failure,
+            "decision_correct": False if not api_failure else None,
+            "task_failure": schema_failure,
             "unknown_to_denial": None,
             "unknown_to_approval": None,
             "uncertainty_preserved": None,
@@ -53,6 +58,8 @@ def score_item(case: BenchmarkCase, answer: AgentAnswer | None, error_type: str 
         "unknown_case": unknown_case,
         "answerable_case": answerable_case,
         "valid_response": True,
+        "provider_failure": False,
+        "evaluable_case": True,
         "decision_correct": answer.decision == case.expected.decision,
         "task_failure": False,
         # Directional unknown metrics are only defined when the oracle says evidence is insufficient.
@@ -92,9 +99,10 @@ def summarize(frame: pd.DataFrame) -> pd.DataFrame:
 
     for keys, group in frame.groupby(group_cols, dropna=False):
         model, protocol, condition = keys
-        unknown = group[group["unknown_case"] & group["valid_response"]]
-        answerable = group[group["answerable_case"] & group["valid_response"]]
+        evaluable = group[group["evaluable_case"]]
         valid = group[group["valid_response"]]
+        unknown = valid[valid["unknown_case"]]
+        answerable = valid[valid["answerable_case"]]
 
         rows.append(
             {
@@ -102,12 +110,14 @@ def summarize(frame: pd.DataFrame) -> pd.DataFrame:
                 "protocol": protocol,
                 "condition": condition,
                 "n_cases": int(len(group)),
+                "n_provider_failures": int(group["provider_failure"].sum()),
+                "n_evaluable_cases": int(group["evaluable_case"].sum()),
                 "n_valid_responses": int(group["valid_response"].sum()),
                 "n_unknown_cases": int(group["unknown_case"].sum()),
                 "n_valid_unknown_responses": int(len(unknown)),
-                "decision_accuracy": _mean(group["decision_correct"]),
-                "task_failure_rate": _mean(group["task_failure"]),
-                "schema_failure_rate": _mean(group["schema_failure"]),
+                "decision_accuracy": _mean(evaluable["decision_correct"]),
+                "task_failure_rate": _mean(evaluable["task_failure"]),
+                "schema_failure_rate": _mean(evaluable["schema_failure"]),
                 "api_failure_rate": _mean(group["api_failure"]),
                 "unknown_to_denial_rate": _mean(unknown["unknown_to_denial"]),
                 "unknown_to_approval_rate": _mean(unknown["unknown_to_approval"]),
