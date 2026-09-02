@@ -1,0 +1,1 @@
+Smoke-test trigger for 2026-09-02. This file exists only to invoke the guarded two-case GitHub Actions plumbing check.
