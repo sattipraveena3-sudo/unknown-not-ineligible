@@ -28,11 +28,6 @@ on:
         required: true
         default: "20"
         type: string
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/smoke-trigger.txt"
 
 permissions:
   contents: read
@@ -48,11 +43,11 @@ jobs:
     env:
       OPENROUTER_API_KEY: ${{ secrets.KEY }}
       PYTHONUNBUFFERED: "1"
-      RUN_KIND: ${{ github.event_name == 'workflow_dispatch' && 'manual' || 'smoke' }}
-      MODEL_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.model_id || 'google/gemma-4-26b-a4b-it:free' }}
-      PROTOCOL: ${{ github.event_name == 'workflow_dispatch' && inputs.protocol || 'evidence_gated' }}
-      CASE_OFFSET: ${{ github.event_name == 'workflow_dispatch' && inputs.case_offset || '0' }}
-      CASE_LIMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.case_limit || '2' }}
+      RUN_KIND: "manual"
+      MODEL_ID: ${{ inputs.model_id }}
+      PROTOCOL: ${{ inputs.protocol }}
+      CASE_OFFSET: ${{ inputs.case_offset }}
+      CASE_LIMIT: ${{ inputs.case_limit }}
 
     steps:
       - name: Check out repository
@@ -160,19 +155,11 @@ jobs:
             date -u +"executed_at_utc=%Y-%m-%dT%H:%M:%SZ"
           } > results/RUN_METADATA.txt
 
-      - name: Mark smoke artifacts as non-publication outputs
-        if: env.RUN_KIND == 'smoke'
-        run: |
-          cat > results/SMOKE_ONLY_DO_NOT_USE_IN_PAPER.txt <<'EOF'
-          This artifact was produced only to verify API secret wiring and pipeline plumbing.
-          It is not part of the preregistered experiment and must not be reported as a result.
-          EOF
-
       - name: Upload immutable result artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.RUN_KIND }}-model-results-${{ github.run_id }}-${{ github.run_attempt }}
+          name: model-results-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             results/
           if-no-files-found: error
