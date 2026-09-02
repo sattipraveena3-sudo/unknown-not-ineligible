@@ -3,12 +3,13 @@ from unknown_ineligible.run_models import build_payload
 
 def test_structured_output_payload_enforces_agent_schema():
     payload = build_payload(
-        "z-ai/glm-5.2:free",
+        "liquid/lfm-2.5-2.6b:free",
         [{"role": "user", "content": "test"}],
         {
             "temperature": 0,
             "max_tokens": 500,
             "structured_output": True,
+            "reasoning": {"effort": "minimal", "exclude": True},
         },
     )
 
@@ -16,6 +17,7 @@ def test_structured_output_payload_enforces_agent_schema():
     assert payload["response_format"]["json_schema"]["strict"] is True
     assert payload["response_format"]["json_schema"]["name"] == "agent_answer"
     assert payload["provider"] == {"require_parameters": True}
+    assert payload["reasoning"] == {"effort": "minimal", "exclude": True}
 
     schema = payload["response_format"]["json_schema"]["schema"]
     assert schema["additionalProperties"] is False
@@ -42,3 +44,4 @@ def test_plain_payload_does_not_request_structured_output():
 
     assert "response_format" not in payload
     assert "provider" not in payload
+    assert "reasoning" not in payload
