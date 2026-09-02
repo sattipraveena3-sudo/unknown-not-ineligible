@@ -28,6 +28,16 @@ def extract_json(text: str) -> dict:
     return json.loads(stripped)
 
 
+def structured_answer_schema() -> dict:
+    schema = AgentAnswer.model_json_schema()
+    # AgentAnswer provides local defaults for convenience, but a remote model response
+    # must explicitly serialize every scored field so missing keys cannot be confused
+    # with intentionally empty lists.
+    schema["required"] = list(schema["properties"])
+    schema["additionalProperties"] = False
+    return schema
+
+
 def build_payload(model: str, messages: list[dict], config: dict) -> dict:
     payload = {
         "model": model,
@@ -45,7 +55,7 @@ def build_payload(model: str, messages: list[dict], config: dict) -> dict:
             "json_schema": {
                 "name": "agent_answer",
                 "strict": True,
-                "schema": AgentAnswer.model_json_schema(),
+                "schema": structured_answer_schema(),
             },
         }
         # OpenRouter should not silently route to an endpoint that drops the
