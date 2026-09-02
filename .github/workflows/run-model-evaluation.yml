@@ -6,7 +6,7 @@ on:
       model_id:
         description: "Exact OpenRouter model ID (prefer a specific :free model)"
         required: true
-        default: "nvidia/nemotron-3.5-lightning:free"
+        default: "z-ai/glm-5.2:free"
         type: string
       protocol:
         description: "Evaluation protocol"
@@ -47,7 +47,7 @@ jobs:
       OPENROUTER_API_KEY: ${{ secrets.KEY }}
       PYTHONUNBUFFERED: "1"
       RUN_KIND: ${{ github.event_name == 'workflow_dispatch' && 'manual' || 'smoke' }}
-      MODEL_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.model_id || 'nvidia/nemotron-3.5-lightning:free' }}
+      MODEL_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.model_id || 'z-ai/glm-5.2:free' }}
       PROTOCOL: ${{ github.event_name == 'workflow_dispatch' && inputs.protocol || 'evidence_gated' }}
       CASE_OFFSET: ${{ github.event_name == 'workflow_dispatch' && inputs.case_offset || '0' }}
       CASE_LIMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.case_limit || '2' }}
@@ -192,6 +192,7 @@ jobs:
               "max_tokens": 500,
               "timeout_seconds": 90,
               "max_attempts": 4,
+              "structured_output": True,
           }
           Path("configs/models.local.yaml").write_text(
               yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
@@ -247,6 +248,7 @@ jobs:
             echo "cases_file=${CASES_FILE}"
             echo "case_offset=${CASE_OFFSET}"
             echo "case_limit=${CASE_LIMIT}"
+            echo "structured_output=true"
             echo "run_id=${GITHUB_RUN_ID}"
             echo "run_attempt=${GITHUB_RUN_ATTEMPT}"
             date -u +"executed_at_utc=%Y-%m-%dT%H:%M:%SZ"
@@ -270,3 +272,23 @@ jobs:
             echo "::error::Provider/API failure occurred. Artifact was preserved, but this run is not a valid model evaluation."
             exit 1
           fi
+
+      - name: Require two parsed responses for smoke validation
+        if: always() && env.RUN_KIND == 'smoke'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("results/raw/responses.jsonl")
+          if not path.exists():
+              raise SystemExit("Smoke validation produced no response file.")
+          rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+          if len(rows) != 2:
+              raise SystemExit(f"Expected exactly 2 smoke responses, found {len(rows)}.")
+          invalid = [row["case_id"] for row in rows if row.get("parsed_answer") is None]
+          if invalid:
+              raise SystemExit(f"Smoke responses failed schema parsing: {invalid}")
+          print("Smoke validation passed: both paired responses parsed against AgentAnswer schema.")
+          PY
