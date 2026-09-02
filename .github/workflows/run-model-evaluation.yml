@@ -6,7 +6,7 @@ on:
       model_id:
         description: "Exact OpenRouter model ID (prefer a specific :free model)"
         required: true
-        default: "meta-llama/llama-3.3-70b-instruct:free"
+        default: "nvidia/nemotron-3.5-lightning:free"
         type: string
       protocol:
         description: "Evaluation protocol"
@@ -47,7 +47,7 @@ jobs:
       OPENROUTER_API_KEY: ${{ secrets.KEY }}
       PYTHONUNBUFFERED: "1"
       RUN_KIND: ${{ github.event_name == 'workflow_dispatch' && 'manual' || 'smoke' }}
-      MODEL_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.model_id || 'meta-llama/llama-3.3-70b-instruct:free' }}
+      MODEL_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.model_id || 'nvidia/nemotron-3.5-lightning:free' }}
       PROTOCOL: ${{ github.event_name == 'workflow_dispatch' && inputs.protocol || 'evidence_gated' }}
       CASE_OFFSET: ${{ github.event_name == 'workflow_dispatch' && inputs.case_offset || '0' }}
       CASE_LIMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.case_limit || '2' }}
