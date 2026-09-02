@@ -28,6 +28,36 @@ def extract_json(text: str) -> dict:
     return json.loads(stripped)
 
 
+def build_payload(model: str, messages: list[dict], config: dict) -> dict:
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": config.get("temperature", 0),
+        "max_tokens": config.get("max_tokens", 500),
+    }
+
+    # For models selected specifically because they support structured outputs,
+    # enforce the exact scoring schema at the API layer. This changes only the
+    # serialization contract, not the eligibility rules or evidence available.
+    if config.get("structured_output", False):
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "agent_answer",
+                "strict": True,
+                "schema": AgentAnswer.model_json_schema(),
+            },
+        }
+        # OpenRouter should not silently route to an endpoint that drops the
+        # required response-format parameter.
+        payload["provider"] = {"require_parameters": True}
+
+    if config.get("reasoning") is not None:
+        payload["reasoning"] = config["reasoning"]
+
+    return payload
+
+
 def _call_once(
     provider: dict, model: str, messages: list[dict], config: dict
 ) -> tuple[str, dict]:
@@ -35,12 +65,7 @@ def _call_once(
     if not key:
         raise RuntimeError(f"Missing environment variable {provider['api_key_env']}")
 
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": config.get("temperature", 0),
-        "max_tokens": config.get("max_tokens", 500),
-    }
+    payload = build_payload(model, messages, config)
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
@@ -153,6 +178,7 @@ def main() -> None:
                         "response_id": None,
                         "response_model": None,
                         "system_fingerprint": None,
+                        "openrouter_metadata": None,
                         "api_status_code": None,
                         "error_type": None,
                         "error_message": None,
@@ -167,6 +193,7 @@ def main() -> None:
                         row["response_id"] = body.get("id")
                         row["response_model"] = body.get("model")
                         row["system_fingerprint"] = body.get("system_fingerprint")
+                        row["openrouter_metadata"] = body.get("openrouter_metadata")
 
                         try:
                             parsed = AgentAnswer.model_validate(extract_json(text))
